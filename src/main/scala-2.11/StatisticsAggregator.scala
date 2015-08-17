@@ -1,0 +1,48 @@
+import org.elasticsearch.action.search.SearchType
+import org.elasticsearch.client.transport.TransportClient
+import org.elasticsearch.common.settings.ImmutableSettings
+import org.elasticsearch.common.transport.InetSocketTransportAddress
+import org.elasticsearch.common.unit.TimeValue
+import org.elasticsearch.node.NodeBuilder._
+import org.elasticsearch.index.query.QueryBuilders._
+import collection.JavaConversions._
+
+
+/**
+ * Created by amits on 14/8/15.
+ */
+object StatisticsAggregator {
+  def main (args: Array[String]) {
+    val clusterName = "kodebeagle1"
+    val hostName = "192.168.2.140"
+    val port = 9301
+    val transportClient = new TransportClient(ImmutableSettings.settingsBuilder().put("cluster.name", clusterName)
+      .put("client.transport.sniff", true).build())
+    val client = transportClient.addTransportAddress(new InetSocketTransportAddress(hostName, port))
+
+    import scala.collection.JavaConversions._
+    println(client.connectedNodes())
+
+    var sizeSum: Int = 0
+    var slocSum, filecountSum = 0
+    var scrollResp = client.prepareSearch("statistics")
+      .setSearchType(SearchType.SCAN).setTypes("typestatistics")
+      .setScroll(new TimeValue(60000))
+      .setSize(1000).execute().actionGet()
+    do {
+      for (hit <- scrollResp.getHits().getHits()) {
+        val source = hit.getSource
+        sizeSum += source.get("size").asInstanceOf[Int]
+        slocSum += source.get("sloc").asInstanceOf[Int]
+        filecountSum += source.get("fileCount").asInstanceOf[Int]
+      }
+      scrollResp = client.prepareSearchScroll(scrollResp.getScrollId()).setScroll(new TimeValue(600000)).execute().actionGet()
+    } while (scrollResp.getHits().getHits().length != 0)
+
+    val statistics = new Statistics(0, slocSum, filecountSum, sizeSum)
+    println(statistics)
+  }
+}
+//todo : change fields to BigInt
+case class Statistics(repoId: Int, sloc: Int, fileCount: Int, size: Long)
+
